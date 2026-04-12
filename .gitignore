@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+.DS_Store
+
+# Data and outputs
+data/raw/
+data/processed/
+outputs/
+reports/figures/
+models/
