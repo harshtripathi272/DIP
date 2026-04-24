@@ -145,7 +145,7 @@ def load_records_from_directory() -> list[SampleRecord]:
     for image_path in RAW_DATA_DIR.rglob("*"):
         if not image_path.is_file():
             continue
-        if image_path.suffix.lower() not in IMAGE_EXTENSIONS:
+        if image_path.suffix.lower() not in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):
             continue
 
         try:
