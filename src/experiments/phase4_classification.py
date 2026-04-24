@@ -79,6 +79,17 @@ def _build_pipeline_with_grid_search(
     y_train: np.ndarray,
     cfg: ExperimentConfig,
 ) -> tuple[Pipeline, dict]:
+    train_classes, train_counts = np.unique(y_train, return_counts=True)
+    if train_classes.shape[0] < 2:
+        raise ValueError("Need at least two scanner classes in train split for classification")
+
+    min_class_count = int(np.min(train_counts))
+    if min_class_count < 2:
+        raise ValueError("Each scanner class needs at least 2 train samples for StratifiedKFold")
+
+    n_lda_components = min(10, x_train.shape[1] - 1, train_classes.shape[0] - 1)
+    n_cv_splits = min(3, min_class_count)
+
     param_grid = {
         "svm__C": cfg.svm_c_grid,
         "svm__gamma": cfg.svm_gamma_grid,
@@ -87,7 +98,7 @@ def _build_pipeline_with_grid_search(
     base_pipeline = Pipeline(
         [
             ("scaler", MinMaxScaler(feature_range=(-1, 1))),
-            ("lda", LinearDiscriminantAnalysis(n_components=min(10, x_train.shape[1] - 1))),
+            ("lda", LinearDiscriminantAnalysis(n_components=n_lda_components)),
             ("svm", SVC(kernel="rbf", random_state=cfg.random_seed, verbose=0)),
         ]
     )
@@ -95,7 +106,7 @@ def _build_pipeline_with_grid_search(
     grid_search = GridSearchCV(
         base_pipeline,
         param_grid,
-        cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=cfg.random_seed),
+        cv=StratifiedKFold(n_splits=n_cv_splits, shuffle=True, random_state=cfg.random_seed),
         n_jobs=-1,
         verbose=1,
     )
