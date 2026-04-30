@@ -97,10 +97,10 @@ def infer_record_from_relative_path(relative_path: str) -> SampleRecord:
     path = Path(relative_path)
     parts = list(path.parts)
 
-    scanner_id = parts[1] if len(parts) > 1 else "UNKNOWN_SCANNER"
-    file_format = parts[2] if len(parts) > 2 else path.suffix.lstrip(".").upper() or "UNKNOWN_FORMAT"
-    dpi = parts[3] if len(parts) > 3 else "UNKNOWN_DPI"
-    scan_location = parts[4] if len(parts) > 4 else "UNKNOWN_LOCATION"
+    scanner_id = parts[0] if len(parts) > 0 else "UNKNOWN_SCANNER"
+    file_format = parts[1] if len(parts) > 1 else path.suffix.lstrip(".").upper() or "UNKNOWN_FORMAT"
+    dpi = parts[2] if len(parts) > 2 else "UNKNOWN_DPI"
+    scan_location = parts[3] if len(parts) > 3 else "UNKNOWN_LOCATION"
 
     jpeg_quality = ""
     lower_name = path.stem.lower()
@@ -145,7 +145,7 @@ def load_records_from_directory() -> list[SampleRecord]:
     for image_path in RAW_DATA_DIR.rglob("*"):
         if not image_path.is_file():
             continue
-        if image_path.suffix.lower() not in IMAGE_EXTENSIONS:
+        if image_path.suffix.lower() not in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):
             continue
 
         try:

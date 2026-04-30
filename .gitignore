@@ -1,3 +1,4 @@
+# Python env & cache
 venv/
 __pycache__/
 *.pyc
@@ -6,12 +7,22 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# IDE / OS
 .vscode/
 .DS_Store
 
-# Data and outputs
-data/raw/
-data/processed/
-outputs/
-reports/figures/
-models/
+# Data (ignore everything inside)
+data/raw/**
+data/processed/**
+
+# Outputs & artifacts
+outputs/**
+reports/figures/**
+models/**
+
+# Optional: keep folder structure but ignore contents
+# !data/raw/.gitkeep
+# !data/processed/.gitkeep
+# !outputs/.gitkeep
+# !models/.gitkeep
