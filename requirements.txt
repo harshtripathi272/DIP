@@ -4,3 +4,4 @@ scikit-learn
 matplotlib
 pillow
 opencv-python
+bm3d

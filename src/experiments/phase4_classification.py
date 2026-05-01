@@ -32,20 +32,21 @@ CONFUSION_MATRIX_PATH = PROCESSED_DATA_DIR / "confusion_matrix.csv"
 CLASSIFICATION_REPORT_PATH = PROCESSED_DATA_DIR / "classification_report.txt"
 
 
-def _load_features_and_labels() -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
+def _load_features_and_labels() -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str], np.ndarray]:
     if not FEATURES_CSV_PATH.exists():
         raise FileNotFoundError(f"Features file not found: {FEATURES_CSV_PATH}")
 
     x_list: list[list[float]] = []
     y_list: list[str] = []
     split_list: list[str] = []
-    scanner_ids: list[str] = []
+    path_list: list[str] = []
 
     with FEATURES_CSV_PATH.open("r", newline="", encoding="utf-8") as fp:
         reader = csv.DictReader(fp)
         for row in reader:
             scanner_id = (row.get("scanner_id") or "").strip()
             split = (row.get("split") or "").strip()
+            rel_path = (row.get("relative_path") or "").strip()
 
             feature_values: list[float] = []
             for col_name in row:
@@ -61,7 +62,7 @@ def _load_features_and_labels() -> tuple[np.ndarray, np.ndarray, np.ndarray, lis
             x_list.append(feature_values)
             y_list.append(scanner_id)
             split_list.append(split)
-            scanner_ids.append(scanner_id)
+            path_list.append(rel_path)
 
     if not x_list:
         raise ValueError("No valid feature rows found in features CSV")
@@ -70,8 +71,9 @@ def _load_features_and_labels() -> tuple[np.ndarray, np.ndarray, np.ndarray, lis
     y_unique = sorted(set(y_list))
     y_encoded = np.array([y_unique.index(label) for label in y_list], dtype=np.int32)
     split_array = np.array(split_list, dtype=str)
+    path_array = np.array(path_list, dtype=str)
 
-    return x, y_encoded, split_array, y_unique
+    return x, y_encoded, split_array, y_unique, path_array
 
 
 def _build_pipeline_with_grid_search(
@@ -125,7 +127,7 @@ def main() -> None:
 
     print("Loading features and labels...")
     try:
-        x, y_encoded, split_array, y_unique = _load_features_and_labels()
+        x, y_encoded, split_array, y_unique, path_array = _load_features_and_labels()
     except ValueError as err:
         print(f"No feature data available: {err}")
         print("\nPhase 4 requires Phase 3 outputs (features_204d.csv).")
@@ -149,6 +151,7 @@ def main() -> None:
     y_train = y_encoded[train_mask]
     x_test = x[test_mask]
     y_test = y_encoded[test_mask]
+    path_test = path_array[test_mask]
 
     print(f"\nTrain set size: {len(x_train)}")
     print(f"Test set size: {len(x_test)}")
@@ -163,12 +166,34 @@ def main() -> None:
     print(f"Best params: {grid_info['best_params']}")
 
     print("\nEvaluating on test set...")
-    y_pred = best_pipeline.predict(x_test)
-    test_accuracy = accuracy_score(y_test, y_pred)
-    print(f"Test accuracy: {test_accuracy:.4f}")
+    y_pred_blocks = best_pipeline.predict(x_test)
+    
+    # Majority voting code
+    unique_paths = np.unique(path_test)
+    y_test_agg = []
+    y_pred_agg = []
+    
+    for path in unique_paths:
+        path_mask = path_test == path
+        y_test_path = y_test[path_mask]
+        
+        # Ground truth is same for all blocks of the image
+        y_test_agg.append(y_test_path[0])
+        
+        # Majority voting
+        preds = y_pred_blocks[path_mask]
+        values, counts = np.unique(preds, return_counts=True)
+        majority_pred = values[np.argmax(counts)]
+        y_pred_agg.append(majority_pred)
+        
+    y_test_agg = np.array(y_test_agg)
+    y_pred_agg = np.array(y_pred_agg)
 
-    cm = confusion_matrix(y_test, y_pred)
-    report = classification_report(y_test, y_pred, target_names=y_unique, zero_division=0)
+    test_accuracy = accuracy_score(y_test_agg, y_pred_agg)
+    print(f"Test accuracy (Image level): {test_accuracy:.4f}")
+
+    cm = confusion_matrix(y_test_agg, y_pred_agg)
+    report = classification_report(y_test_agg, y_pred_agg, target_names=y_unique, zero_division=0)
 
     MODEL_PIPELINE_PATH.parent.mkdir(parents=True, exist_ok=True)
     import joblib

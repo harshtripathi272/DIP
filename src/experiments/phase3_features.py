@@ -11,7 +11,7 @@ from PIL import Image
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.config import DATASET_INDEX_PATH, PROCESSED_DATA_DIR, RAW_DATA_DIR
+from src.config import DATASET_INDEX_PATH, PROCESSED_DATA_DIR, RAW_DATA_DIR, ExperimentConfig
 from src.features.pipeline import extract_204d_features_from_image
 from src.paths import ensure_project_directories
 
@@ -82,31 +82,46 @@ def main() -> None:
 
             try:
                 image_rgb = _load_image_as_rgb_float(image_path)
-                features_204d, filter_names = extract_204d_features_from_image(image_rgb)
+                
+                config = ExperimentConfig()
+                h, w = image_rgb.shape[:2]
+                bh, bw = config.block_height, config.block_width
+                
+                if h > bh and w > bw:
+                    blocks = []
+                    for r in range(0, h - bh + 1, bh):
+                        for c in range(0, w - bw + 1, bw):
+                            blocks.append((r, c, image_rgb[r:r+bh, c:c+bw]))
+                    if not blocks:
+                        blocks = [(0, 0, image_rgb)]
+                else:
+                    blocks = [(0, 0, image_rgb)]
+                
+                for block_r, block_c, block_rgb in blocks:
+                    features_204d, filter_names = extract_204d_features_from_image(block_rgb)
+
+                    if features_204d.shape[0] != 204:
+                        continue
+
+                    if active_filters is None:
+                        active_filters = filter_names
+
+                    writer.writerow(
+                        [
+                            rel_path,
+                            row.get("scanner_id", ""),
+                            row.get("file_format", ""),
+                            row.get("dpi", ""),
+                            row.get("scan_location", ""),
+                            row.get("jpeg_quality", ""),
+                            row.get("split", ""),
+                            *[f"{value:.10f}" for value in features_204d],
+                        ]
+                    )
+                    written += 1
             except Exception:
                 skipped += 1
                 continue
-
-            if features_204d.shape[0] != 204:
-                skipped += 1
-                continue
-
-            if active_filters is None:
-                active_filters = filter_names
-
-            writer.writerow(
-                [
-                    rel_path,
-                    row.get("scanner_id", ""),
-                    row.get("file_format", ""),
-                    row.get("dpi", ""),
-                    row.get("scan_location", ""),
-                    row.get("jpeg_quality", ""),
-                    row.get("split", ""),
-                    *[f"{value:.10f}" for value in features_204d],
-                ]
-            )
-            written += 1
 
     meta_lines = [
         f"records_in_index={len(rows)}",

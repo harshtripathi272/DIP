@@ -24,7 +24,7 @@ def _denoise_bm3d_or_fallback(channel: np.ndarray) -> np.ndarray:
     try:
         from bm3d import bm3d  # type: ignore
 
-        denoised = bm3d(channel, sigma_psd=0.05)
+        denoised = bm3d(channel, sigma_psd=0.02)
         return _clip01(denoised.astype(np.float64, copy=False))
     except Exception:
         # Fallback keeps phase-3 runnable even without bm3d installed.
