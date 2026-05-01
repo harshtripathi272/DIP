@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable
+import warnings
 
 import numpy as np
 from scipy.ndimage import median_filter
@@ -20,6 +21,13 @@ def _clip01(channel: np.ndarray) -> np.ndarray:
     return np.clip(channel, 0.0, 1.0)
 
 
+def _safe_wiener(channel: np.ndarray, mysize: int) -> np.ndarray:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        denoised = wiener(channel, mysize=mysize)
+    return np.nan_to_num(denoised, nan=0.0, posinf=1.0, neginf=0.0).astype(np.float64, copy=False)
+
+
 def _denoise_bm3d_or_fallback(channel: np.ndarray) -> np.ndarray:
     try:
         from bm3d import bm3d  # type: ignore
@@ -28,7 +36,7 @@ def _denoise_bm3d_or_fallback(channel: np.ndarray) -> np.ndarray:
         return _clip01(denoised.astype(np.float64, copy=False))
     except Exception:
         # Fallback keeps phase-3 runnable even without bm3d installed.
-        return _clip01(wiener(channel, mysize=5).astype(np.float64, copy=False))
+        return _clip01(_safe_wiener(channel, mysize=5))
 
 
 def _denoise_median3(channel: np.ndarray) -> np.ndarray:
@@ -36,11 +44,11 @@ def _denoise_median3(channel: np.ndarray) -> np.ndarray:
 
 
 def _denoise_wiener3(channel: np.ndarray) -> np.ndarray:
-    return _clip01(wiener(channel, mysize=3).astype(np.float64, copy=False))
+    return _clip01(_safe_wiener(channel, mysize=3))
 
 
 def _denoise_wiener5(channel: np.ndarray) -> np.ndarray:
-    return _clip01(wiener(channel, mysize=5).astype(np.float64, copy=False))
+    return _clip01(_safe_wiener(channel, mysize=5))
 
 
 def get_filterbank(config: FilterbankConfig | None = None) -> dict[str, FilterFn]:
