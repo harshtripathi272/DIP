@@ -4,233 +4,180 @@ import csv
 from pathlib import Path
 import sys
 
+import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.svm import SVC
-from sklearn.metrics import confusion_matrix, accuracy_score, classification_report
-import json
 
 
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.config import (
-    DATASET_INDEX_PATH,
-    MODELS_DIR,
-    PROCESSED_DATA_DIR,
-    ExperimentConfig,
-)
+from src.config import FEATURES_CSV_PATH, PROJECT_ROOT, RESULTS_DIR, ExperimentConfig
 from src.paths import ensure_project_directories
 
-FEATURES_CSV_PATH = PROCESSED_DATA_DIR / "features_204d.csv"
-MODEL_PIPELINE_PATH = MODELS_DIR / "classifier_pipeline.pkl"
-RESULTS_JSON_PATH = PROCESSED_DATA_DIR / "phase4_results.json"
-CONFUSION_MATRIX_PATH = PROCESSED_DATA_DIR / "confusion_matrix.csv"
-CLASSIFICATION_REPORT_PATH = PROCESSED_DATA_DIR / "classification_report.txt"
+
+REPORT_PATH = RESULTS_DIR / "report.txt"
+CONFUSION_MATRIX_PNG_PATH = RESULTS_DIR / "confusion_matrix.png"
 
 
-def _load_features_and_labels() -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str], np.ndarray]:
+def _load_features() -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
     if not FEATURES_CSV_PATH.exists():
         raise FileNotFoundError(f"Features file not found: {FEATURES_CSV_PATH}")
 
-    x_list: list[list[float]] = []
-    y_list: list[str] = []
-    split_list: list[str] = []
-    path_list: list[str] = []
+    feature_rows: list[list[float]] = []
+    labels: list[int] = []
+    splits: list[str] = []
 
     with FEATURES_CSV_PATH.open("r", newline="", encoding="utf-8") as fp:
         reader = csv.DictReader(fp)
         for row in reader:
-            scanner_id = (row.get("scanner_id") or "").strip()
+            image_path = (row.get("image_path") or "").strip()
+            scanner_label = (row.get("scanner_label") or "").strip()
             split = (row.get("split") or "").strip()
-            rel_path = (row.get("relative_path") or "").strip()
 
-            feature_values: list[float] = []
-            for col_name in row:
-                if col_name.startswith("f") and col_name[1:].isdigit():
-                    try:
-                        feature_values.append(float(row[col_name]))
-                    except ValueError:
-                        pass
-
-            if not feature_values:
+            if not image_path or not scanner_label:
                 continue
 
-            x_list.append(feature_values)
-            y_list.append(scanner_id)
-            split_list.append(split)
-            path_list.append(rel_path)
+            values: list[float] = []
+            for index in range(204):
+                value = row.get(f"f{index}")
+                if value is None or value == "":
+                    values = []
+                    break
+                values.append(float(value))
 
-    if not x_list:
-        raise ValueError("No valid feature rows found in features CSV")
+            if len(values) != 204:
+                continue
 
-    x = np.array(x_list, dtype=np.float64)
-    y_unique = sorted(set(y_list))
-    y_encoded = np.array([y_unique.index(label) for label in y_list], dtype=np.int32)
-    split_array = np.array(split_list, dtype=str)
-    path_array = np.array(path_list, dtype=str)
+            feature_rows.append(values)
+            labels.append(int(scanner_label))
+            splits.append(split)
 
-    return x, y_encoded, split_array, y_unique, path_array
+    if not feature_rows:
+        raise ValueError("No valid feature rows found in features.csv")
+
+    x = np.asarray(feature_rows, dtype=np.float32)
+    y = np.asarray(labels, dtype=np.int32)
+    split_array = np.asarray(splits, dtype=str)
+    class_names = [str(label) for label in sorted(set(labels))]
+    return x, y, split_array, class_names
 
 
-def _build_pipeline_with_grid_search(
+def _fit_scaler_and_lda(
     x_train: np.ndarray,
     y_train: np.ndarray,
+    x_test: np.ndarray,
     cfg: ExperimentConfig,
-) -> tuple[Pipeline, dict]:
-    train_classes, train_counts = np.unique(y_train, return_counts=True)
-    if train_classes.shape[0] < 2:
-        raise ValueError("Need at least two scanner classes in train split for classification")
+) -> tuple[np.ndarray, np.ndarray, MinMaxScaler, LinearDiscriminantAnalysis]:
+    scaler = MinMaxScaler(feature_range=(-1, 1))
+    x_train_scaled = scaler.fit_transform(x_train).astype(np.float32, copy=False)
+    x_test_scaled = scaler.transform(x_test).astype(np.float32, copy=False)
 
-    min_class_count = int(np.min(train_counts))
-    if min_class_count < 2:
-        raise ValueError("Each scanner class needs at least 2 train samples for StratifiedKFold")
+    n_classes = len(np.unique(y_train))
+    n_features = x_train_scaled.shape[1]
+    n_components = min(10, n_classes - 1, n_features - 1)
+    if n_components < 1:
+        raise ValueError("LDA needs at least two classes and two features")
 
-    n_lda_components = min(10, x_train.shape[1] - 1, train_classes.shape[0] - 1)
-    n_cv_splits = min(3, min_class_count)
+    lda = LinearDiscriminantAnalysis(n_components=n_components)
+    x_train_lda = lda.fit_transform(x_train_scaled, y_train).astype(np.float32, copy=False)
+    x_test_lda = lda.transform(x_test_scaled).astype(np.float32, copy=False)
+    return x_train_lda, x_test_lda, scaler, lda
 
+
+def _train_svm(x_train: np.ndarray, y_train: np.ndarray, cfg: ExperimentConfig) -> GridSearchCV:
     param_grid = {
-        "svm__C": cfg.svm_c_grid,
-        "svm__gamma": cfg.svm_gamma_grid,
+        "C": [0.1, 1.0, 10.0, 100.0],
+        "gamma": ["scale", 0.01, 0.1, 1.0],
     }
-
-    base_pipeline = Pipeline(
-        [
-            ("scaler", MinMaxScaler(feature_range=(-1, 1))),
-            ("lda", LinearDiscriminantAnalysis(n_components=n_lda_components)),
-            ("svm", SVC(kernel="rbf", random_state=cfg.random_seed, verbose=0)),
-        ]
-    )
-
-    grid_search = GridSearchCV(
-        base_pipeline,
-        param_grid,
-        cv=StratifiedKFold(n_splits=n_cv_splits, shuffle=True, random_state=cfg.random_seed),
-        n_jobs=-1,
-        verbose=1,
-    )
-
+    svm = SVC(kernel="rbf")
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=cfg.random_seed)
+    grid_search = GridSearchCV(svm, param_grid=param_grid, cv=cv, n_jobs=-1, verbose=1)
     grid_search.fit(x_train, y_train)
+    return grid_search
 
-    best_params = grid_search.best_params_
-    best_score = grid_search.best_score_
 
-    return grid_search.best_estimator_, {"best_params": best_params, "best_cv_score": float(best_score)}
+def _save_confusion_matrix_png(matrix: np.ndarray, class_names: list[str]) -> None:
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    image = ax.imshow(matrix, interpolation="nearest", cmap="Blues")
+    fig.colorbar(image, ax=ax)
+    ax.set_xticks(np.arange(len(class_names)))
+    ax.set_yticks(np.arange(len(class_names)))
+    ax.set_xticklabels(class_names)
+    ax.set_yticklabels(class_names)
+    ax.set_xlabel("Predicted label")
+    ax.set_ylabel("True label")
+    ax.set_title("Confusion Matrix")
+
+    threshold = matrix.max() / 2.0 if matrix.size else 0.0
+    for row_index in range(matrix.shape[0]):
+        for col_index in range(matrix.shape[1]):
+            value = matrix[row_index, col_index]
+            ax.text(
+                col_index,
+                row_index,
+                str(value),
+                ha="center",
+                va="center",
+                color="white" if value > threshold else "black",
+            )
+
+    fig.tight_layout()
+    fig.savefig(CONFUSION_MATRIX_PNG_PATH, dpi=200)
+    plt.close(fig)
 
 
 def main() -> None:
     cfg = ExperimentConfig()
     ensure_project_directories()
 
-    print("Loading features and labels...")
-    try:
-        x, y_encoded, split_array, y_unique, path_array = _load_features_and_labels()
-    except ValueError as err:
-        print(f"No feature data available: {err}")
-        print("\nPhase 4 requires Phase 3 outputs (features_204d.csv).")
-        print("To generate features, you must:")
-        print("  1. Add scanner images to data/raw/")
-        print("  2. Update data/raw/dataset_manifest.csv with paths and metadata")
-        print("  3. Run: python src/experiments/phase2_dataset.py")
-        print("  4. Run: python src/experiments/phase3_features.py")
-        print("  5. Run: python src/experiments/phase4_classification.py")
-        return
-
-    print(f"Total samples: {len(x)}")
-    print(f"Feature dimension: {x.shape[1]}")
-    print(f"Scanner classes: {len(y_unique)}")
-    print(f"Scanners: {y_unique}")
-
+    x, y, split_array, class_names = _load_features()
     train_mask = split_array == "train"
     test_mask = split_array == "test"
 
     x_train = x[train_mask]
-    y_train = y_encoded[train_mask]
+    y_train = y[train_mask]
     x_test = x[test_mask]
-    y_test = y_encoded[test_mask]
-    path_test = path_array[test_mask]
+    y_test = y[test_mask]
 
-    print(f"\nTrain set size: {len(x_train)}")
-    print(f"Test set size: {len(x_test)}")
+    if x_train.size == 0 or x_test.size == 0:
+        raise ValueError("Train or test split is empty")
 
-    if len(x_train) == 0 or len(x_test) == 0:
-        raise ValueError("Train or test set is empty after splitting")
+    x_train_lda, x_test_lda, _, _ = _fit_scaler_and_lda(x_train, y_train, x_test, cfg)
+    grid_search = _train_svm(x_train_lda, y_train, cfg)
 
-    print("\nRunning grid search for best SVM hyperparameters...")
-    best_pipeline, grid_info = _build_pipeline_with_grid_search(x_train, y_train, cfg)
+    best_svm = grid_search.best_estimator_
+    y_pred = best_svm.predict(x_test_lda)
 
-    print(f"Best CV score: {grid_info['best_cv_score']:.4f}")
-    print(f"Best params: {grid_info['best_params']}")
+    labels = [int(label) for label in sorted(set(y.tolist()))]
+    cm = confusion_matrix(y_test, y_pred, labels=labels)
+    overall_accuracy = accuracy_score(y_test, y_pred)
+    per_class_accuracy = np.divide(
+        np.diag(cm),
+        cm.sum(axis=1),
+        out=np.zeros(cm.shape[0], dtype=np.float32),
+        where=cm.sum(axis=1) != 0,
+    )
+    report = classification_report(y_test, y_pred, labels=labels, target_names=class_names, zero_division=0)
 
-    print("\nEvaluating on test set...")
-    y_pred_blocks = best_pipeline.predict(x_test)
-    
-    # Majority voting code
-    unique_paths = np.unique(path_test)
-    y_test_agg = []
-    y_pred_agg = []
-    
-    for path in unique_paths:
-        path_mask = path_test == path
-        y_test_path = y_test[path_mask]
-        
-        # Ground truth is same for all blocks of the image
-        y_test_agg.append(y_test_path[0])
-        
-        # Majority voting
-        preds = y_pred_blocks[path_mask]
-        values, counts = np.unique(preds, return_counts=True)
-        majority_pred = values[np.argmax(counts)]
-        y_pred_agg.append(majority_pred)
-        
-    y_test_agg = np.array(y_test_agg)
-    y_pred_agg = np.array(y_pred_agg)
+    print("Confusion matrix:")
+    print(cm)
+    for class_name, class_accuracy in zip(class_names, per_class_accuracy, strict=True):
+        print(f"Class {class_name} accuracy: {class_accuracy:.4f}")
+    print(f"Overall accuracy: {overall_accuracy:.4f}")
+    print(f"Best SVM params: {grid_search.best_params_}")
+    print(f"Best CV score: {grid_search.best_score_:.4f}")
 
-    test_accuracy = accuracy_score(y_test_agg, y_pred_agg)
-    print(f"Test accuracy (Image level): {test_accuracy:.4f}")
+    _save_confusion_matrix_png(cm, class_names)
+    REPORT_PATH.write_text(report, encoding="utf-8")
 
-    cm = confusion_matrix(y_test_agg, y_pred_agg)
-    report = classification_report(y_test_agg, y_pred_agg, target_names=y_unique, zero_division=0)
-
-    MODEL_PIPELINE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    import joblib
-    joblib.dump(best_pipeline, MODEL_PIPELINE_PATH)
-    print(f"Model saved to: {MODEL_PIPELINE_PATH}")
-
-    results = {
-        "test_accuracy": float(test_accuracy),
-        "train_set_size": len(x_train),
-        "test_set_size": len(x_test),
-        "feature_dimension": x.shape[1],
-        "n_classes": len(y_unique),
-        "scanner_classes": y_unique,
-        "grid_search": grid_info,
-        "confusion_matrix": cm.tolist(),
-    }
-
-    RESULTS_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with RESULTS_JSON_PATH.open("w", encoding="utf-8") as fp:
-        json.dump(results, fp, indent=2)
-    print(f"Results saved to: {RESULTS_JSON_PATH}")
-
-    with CONFUSION_MATRIX_PATH.open("w", newline="", encoding="utf-8") as fp:
-        writer = csv.writer(fp)
-        writer.writerow([""] + y_unique)
-        for i, scanner_id in enumerate(y_unique):
-            writer.writerow([scanner_id] + cm[i].tolist())
-    print(f"Confusion matrix saved to: {CONFUSION_MATRIX_PATH}")
-
-    with CLASSIFICATION_REPORT_PATH.open("w", encoding="utf-8") as fp:
-        fp.write(report)
-    print(f"Classification report saved to: {CLASSIFICATION_REPORT_PATH}")
-
-    print("\n" + "=" * 60)
-    print("Classification Report:")
-    print("=" * 60)
-    print(report)
+    print(f"Confusion matrix saved to: {CONFUSION_MATRIX_PNG_PATH}")
+    print(f"Classification report saved to: {REPORT_PATH}")
 
 
 if __name__ == "__main__":

@@ -24,6 +24,36 @@
 
 ---
 
+## Quick Start
+
+Use the project venv before running the pipeline:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Then run the full workflow from the project root:
+
+```bash
+./run_pipeline.sh
+```
+
+If you want to run the stages manually:
+
+```powershell
+python reorganize_dataset.py
+python src/experiments/phase3_features.py
+python src/experiments/phase4_classification.py
+```
+
+Outputs:
+- `dataset.csv` at the project root
+- `features.csv` at the project root
+- `results/confusion_matrix.png`
+- `results/report.txt`
+
+---
+
 ## 1. Paper Overview
 
 | Attribute | Detail |

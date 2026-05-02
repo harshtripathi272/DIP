@@ -3,6 +3,7 @@ from pathlib import Path
 from .config import (
     DATASET_PLACEHOLDER_ROOT,
     DATA_DIR,
+    RESULTS_DIR,
     FIGURES_DIR,
     MODELS_DIR,
     OUTPUTS_DIR,
@@ -10,6 +11,7 @@ from .config import (
     RAW_DATA_DIR,
     REPORTS_DIR,
     SPLITS_DIR,
+    STANDARDIZED_DATA_DIR,
 )
 
 
@@ -23,6 +25,8 @@ DIRECTORIES = (
     REPORTS_DIR,
     FIGURES_DIR,
     MODELS_DIR,
+    RESULTS_DIR,
+    STANDARDIZED_DATA_DIR,
 )
 
 
