@@ -55,13 +55,24 @@ def _write_dataset_csv(records: list[dict[str, str]]) -> None:
 
 
 def main() -> None:
-    scanner1_root = RAW_DATA_DIR / "scanner1"
-    scanner2_root = RAW_DATA_DIR / "scanner2"
+    # Discover all immediate subdirectories in RAW_DATA_DIR and treat each as a source label
+    if not RAW_DATA_DIR.exists() or not RAW_DATA_DIR.is_dir():
+        raise FileNotFoundError(f"Raw data directory not found: {RAW_DATA_DIR}")
 
-    items = _collect_images(scanner1_root, 0) + _collect_images(scanner2_root, 1)
+    source_roots = [p for p in sorted(RAW_DATA_DIR.iterdir()) if p.is_dir()]
+    if not source_roots:
+        raise FileNotFoundError(f"No subfolders found under {RAW_DATA_DIR}. Place your datasets in subfolders like '{RAW_DATA_DIR}/footprints' and '{RAW_DATA_DIR}/seeds'.")
+
+    items: list[DatasetItem] = []
+    label_to_root: dict[int, Path] = {}
+    for label, root in enumerate(source_roots):
+        label_to_root[label] = root
+        items.extend(_collect_images(root, label))
+
     if not items:
+        found = ", ".join(p.name for p in source_roots)
         raise FileNotFoundError(
-            "No images found under data/raw/scanner1 or data/raw/scanner2."
+            f"No images found under any raw subfolders: {found}."
         )
 
     labels = np.array([item.scanner_label for item in items], dtype=np.int32)
@@ -81,7 +92,7 @@ def main() -> None:
     records: list[dict[str, str]] = []
 
     for index, item in enumerate(items):
-        source_root = scanner1_root if item.scanner_label == 0 else scanner2_root
+        source_root = label_to_root[item.scanner_label]
         standardized_path = _standardize_image(item.source_path, standardized_root, source_root)
         records.append(
             {
