@@ -55,24 +55,29 @@ def _write_dataset_csv(records: list[dict[str, str]]) -> None:
 
 
 def main() -> None:
-    # Discover all immediate subdirectories in RAW_DATA_DIR and treat each as a source label
     if not RAW_DATA_DIR.exists() or not RAW_DATA_DIR.is_dir():
         raise FileNotFoundError(f"Raw data directory not found: {RAW_DATA_DIR}")
 
-    source_roots = [p for p in sorted(RAW_DATA_DIR.iterdir()) if p.is_dir()]
-    if not source_roots:
-        raise FileNotFoundError(f"No subfolders found under {RAW_DATA_DIR}. Place your datasets in subfolders like '{RAW_DATA_DIR}/footprints' and '{RAW_DATA_DIR}/seeds'.")
+    # Focus on the footprint scanner pair only; ignore unrelated clutter such as
+    # docs/, repository/, and the separate seeds dataset.
+    source_roots = [
+        (0, RAW_DATA_DIR / "footprints" / "Dactyloscopic"),
+        (1, RAW_DATA_DIR / "footprints" / "Scanned"),
+    ]
 
     items: list[DatasetItem] = []
     label_to_root: dict[int, Path] = {}
-    for label, root in enumerate(source_roots):
+    for label, root in source_roots:
+        if not root.exists() or not root.is_dir():
+            raise FileNotFoundError(
+                f"Expected dataset folder not found: {root}"
+            )
         label_to_root[label] = root
         items.extend(_collect_images(root, label))
 
     if not items:
-        found = ", ".join(p.name for p in source_roots)
         raise FileNotFoundError(
-            f"No images found under any raw subfolders: {found}."
+            "No images found under data/raw/footprints/Dactyloscopic or data/raw/footprints/Scanned."
         )
 
     labels = np.array([item.scanner_label for item in items], dtype=np.int32)
