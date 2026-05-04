@@ -95,7 +95,12 @@ def _train_svm(x_train: np.ndarray, y_train: np.ndarray, cfg: ExperimentConfig) 
         "gamma": ["scale", 0.01, 0.1, 1.0],
     }
     svm = SVC(kernel="rbf")
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=cfg.random_seed)
+    class_counts = np.bincount(y_train)
+    min_class_count = int(class_counts[class_counts > 0].min())
+    n_splits = min(5, min_class_count)
+    if n_splits < 2:
+        raise ValueError("Need at least two training samples per class for SVM cross-validation")
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=cfg.random_seed)
     grid_search = GridSearchCV(svm, param_grid=param_grid, cv=cv, n_jobs=-1, verbose=1)
     grid_search.fit(x_train, y_train)
     return grid_search
