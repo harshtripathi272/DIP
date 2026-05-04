@@ -121,15 +121,14 @@ def main() -> None:
     parser = _build_argument_parser()
     args = parser.parse_args()
 
-    if not RAW_DATA_DIR.exists() or not RAW_DATA_DIR.is_dir():
-        raise FileNotFoundError(f"Raw data directory not found: {RAW_DATA_DIR}")
-
     if args.dataset_root:
         dataset_root = Path(args.dataset_root).expanduser().resolve()
         if not dataset_root.exists() or not dataset_root.is_dir():
             raise FileNotFoundError(f"Dataset root not found: {dataset_root}")
         source_specs = _resolve_named_source_specs(dataset_root)
     else:
+        if not RAW_DATA_DIR.exists() or not RAW_DATA_DIR.is_dir():
+            raise FileNotFoundError(f"Raw data directory not found: {RAW_DATA_DIR}")
         source_specs = _parse_source_specs(args.source) if args.source else _default_source_specs()
 
     items: list[DatasetItem] = []
