@@ -70,6 +70,21 @@ def _parse_source_specs(source_args: list[str]) -> list[SourceSpec]:
     return specs
 
 
+def _resolve_named_source_specs(dataset_root: Path) -> list[SourceSpec]:
+    expected_names = [
+        "s1_epson_4490",
+        "s2_hp_scanjet_6300c_1_SG9CO270W5",
+        "s3_hp_scanjet_6300c_2",
+        "s4_hp_scanjet_8250",
+    ]
+
+    specs: list[SourceSpec] = []
+    for index, folder_name in enumerate(expected_names):
+        root = dataset_root / folder_name
+        specs.append(SourceSpec(label=index, root=root, name=folder_name))
+    return specs
+
+
 def _default_source_specs() -> list[SourceSpec]:
     return [
         SourceSpec(label=0, root=RAW_DATA_DIR / "footprints" / "Dactyloscopic", name="Dactyloscopic"),
@@ -82,6 +97,13 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         description=(
             "Standardize images, assign numeric labels, and create dataset.csv for the classifier."
         )
+    )
+    parser.add_argument(
+        "--dataset-root",
+        metavar="PATH",
+        help=(
+            "Parent folder that contains the four scanner datasets named s1_epson_4490, s2_hp_scanjet_6300c_1_SG9CO270W5, s3_hp_scanjet_6300c_2, and s4_hp_scanjet_8250."
+        ),
     )
     parser.add_argument(
         "--source",
@@ -102,7 +124,14 @@ def main() -> None:
     if not RAW_DATA_DIR.exists() or not RAW_DATA_DIR.is_dir():
         raise FileNotFoundError(f"Raw data directory not found: {RAW_DATA_DIR}")
 
-    source_specs = _parse_source_specs(args.source) if args.source else _default_source_specs()
+    if args.dataset_root:
+        dataset_root = Path(args.dataset_root).expanduser().resolve()
+        if not dataset_root.exists() or not dataset_root.is_dir():
+            raise FileNotFoundError(f"Dataset root not found: {dataset_root}")
+        source_specs = _resolve_named_source_specs(dataset_root)
+    else:
+        source_specs = _parse_source_specs(args.source) if args.source else _default_source_specs()
+
     items: list[DatasetItem] = []
     label_to_root: dict[int, Path] = {}
     label_to_name: dict[int, str] = {}
