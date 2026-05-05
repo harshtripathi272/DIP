@@ -17,7 +17,7 @@ data/raw/**
 data/processed/**
 
 # Outputs & artifacts
-outputs/**
+
 reports/figures/**
 models/**
 
